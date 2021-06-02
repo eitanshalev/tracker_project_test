@@ -15,7 +15,9 @@ var Mutex = require('async-mutex').Mutex;
 const mutex = new Mutex();
 const googleMutex = new Mutex();
 
-var port = normalizePort(process.env.PORT || '3000');
+//var port = normalizePort(process.env.PORT || '3000');
+const port = process.env.PORT || 3000;
+
 app.set('port', port);
 
 /**
