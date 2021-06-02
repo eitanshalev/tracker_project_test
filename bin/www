@@ -1,0 +1,161 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('server-maps:server');
+var http = require('http');
+const mongoUtil = require('../db');
+/**
+ * Get port from environment and store in Express.
+ */
+var Mutex = require('async-mutex').Mutex;
+const mutex = new Mutex();
+const googleMutex = new Mutex();
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+mongoUtil.connectToDB((err,client)=>{
+  if(err){
+    console.log(err);
+    return;
+  }
+  mongoUtil.MongoConnect(()=>{
+  server.listen(port);
+  const socket_server = app.listen(3002);
+  console.log("port", port)
+  var io = require('../socket').init(socket_server);//, {cors: {origin: "*"}})
+    let sockets = require('../socket').getSockets();
+    let googleSockets = require('../socket').googleSockets();
+  io.on("connection", socket => {
+    console.log("client connected to socket");
+    //console.log("sockets before:", sockets);
+    //add {socket, query} to socket.js
+
+    let user = socket.handshake.query.user;
+    if(user) {
+        console.log("realtime request came in for: ", user)
+        let user_name = user.toString();
+        sockets.push([user_name, socket]);
+        //console.log("index is ", sockets.indexOf([user, socket]))
+        console.log("conn: ", sockets.length);
+    }
+
+    else {
+      let speaker = socket.handshake.query.speaker;
+      if (speaker) {
+        console.log("google request came in for: ", speaker);
+        let speaker_name = speaker.toString();
+        googleSockets.push([speaker_name, socket, true])
+      }
+    }
+    // console.log("sockets after:", sockets);
+    socket.on('disconnect', function() {
+      //console.log("index was ", sockets.indexOf([socket.handshake.query.user.toString(), socket]))
+
+      if(socket.handshake.query.user) {
+        mutex
+            .runExclusive(function () {
+              sockets.forEach((ele, index) => {
+                if (ele[0] == socket.handshake.query.user.toString() && ele[1] == socket)
+                  sockets.splice(index, 1);
+              })
+            })
+            .then(function (result) {
+              console.log("disc: ", sockets.length)
+            });
+      }
+      else if(socket.handshake.query.speaker) {
+        googleMutex
+            .runExclusive(function () {
+              googleSockets.forEach((ele, index) => {
+                if (ele[0] == socket.handshake.query.speaker.toString() && ele[1] == socket)
+                  googleSockets.splice(index, 1);
+              })
+            })
+            .then(function (result) {
+              console.log("disc: ", googleSockets.length)
+            });
+      }
+
+
+
+    });
+  });
+  })
+});
+
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
